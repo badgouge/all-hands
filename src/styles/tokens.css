@@ -1,0 +1,87 @@
+/*
+ * MNP design tokens from the PCS Calculator MNP shell:
+ *   PCS Calculator/mnp/src/styles/tokens.css
+ * Status foreground pairs follow the same palette in PCS Calculator_MNP.
+ * Replace this file when an official MNP token package is supplied.
+ * This is the project design system, not a separately invented theme.
+ */
+
+:root {
+  --background: #ffffff;
+  --foreground: #1b1b1b;
+  --card: #ffffff;
+  --muted: #f0f0f0;
+  --muted-foreground: #565c65;
+  --primary: #1a4480;
+  --primary-foreground: #ffffff;
+  --secondary: #e7e8e9;
+  --secondary-foreground: #1b1b1b;
+  --accent: #c47f00;
+  --accent-foreground: #1b1b1b;
+  --destructive: #b50909;
+  --destructive-foreground: #ffffff;
+  --success: #0e7c28;
+  --success-foreground: #ffffff;
+  --warning: #936f38;
+  --warning-foreground: #1b1b1b;
+  --info: #005ea2;
+  --info-foreground: #ffffff;
+  --border: #dfe1e2;
+  --ring: #1a4480;
+  --input: #dfe1e2;
+
+  --uswds-navy-darkest: #0b1733;
+  --uswds-navy-darker: #162e51;
+  --uswds-navy-dark: #1a4480;
+  --uswds-navy: #005ea2;
+  --uswds-navy-vivid: #0050d8;
+  --uswds-navy-light: #73b3e7;
+  --uswds-gold-vivid: #ffbe2e;
+  --uswds-gold: #ffe396;
+  --uswds-gold-light: #fee685;
+  --uswds-ink: #1b1b1b;
+  --uswds-base-darker: #2d2e2f;
+  --uswds-base-dark: #565c65;
+  --uswds-base: #71767a;
+  --uswds-base-light: #a9aeb1;
+  --uswds-base-lighter: #dfe1e2;
+  --uswds-base-lightest: #f0f0f0;
+  --uswds-error: #d83933;
+  --uswds-warning: #ffbe2e;
+  --uswds-success: #00a91c;
+  --uswds-info: #00bde3;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  --font-sans: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+  --page-max: 1400px;
+}
+
+.dark {
+  --background: #0b1733;
+  --foreground: #ffffff;
+  --card: #162e51;
+  --muted: #1f3766;
+  --muted-foreground: #dfe1e2;
+  --primary: #ffbe2e;
+  --primary-foreground: #0b1733;
+  --secondary: #1a4480;
+  --secondary-foreground: #ffffff;
+  --accent: #ffbe2e;
+  --accent-foreground: #0b1733;
+  --destructive: #ff8d7b;
+  --destructive-foreground: #0b1733;
+  --success: #70e17b;
+  --success-foreground: #0b1733;
+  --warning: #ffbe2e;
+  --warning-foreground: #0b1733;
+  --info: #73b3e7;
+  --info-foreground: #0b1733;
+  --border: #1a4480;
+  --ring: #ffbe2e;
+  --input: #1a4480;
+}
