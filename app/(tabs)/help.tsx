@@ -4,7 +4,7 @@ import { useAccountability } from '../../src/app/state/AccountabilityProvider';
 import { CRISIS_LINE, SAPR_LINE, SELF_HELP_LABEL, summarizeSelfHelp } from '../../src/domain/help';
 import { displayName } from '../../src/domain/labels';
 import type { HelpSubject, SelfHelpKind } from '../../src/domain/types';
-import { Choice, Dropdown, Field, Note, PrimaryButton, Screen, SecondaryButton, WarningBanner } from '../../src/ui/ios';
+import { Choice, Dropdown, Field, InfoTip, Note, PrimaryButton, Screen, SecondaryButton, WarningBanner } from '../../src/ui/ios';
 import { useTheme } from '../../src/ui/theme';
 import { ResourceCard } from '../../src/ui/wizards';
 
@@ -62,7 +62,7 @@ export default function HelpScreen() {
       ) : null}
       {step === 0 ? (
         <>
-          <Note>This is for an emergency. A routine late muster stays on the Muster screen.</Note>
+          <InfoTip>This is for an emergency. A routine late muster stays on the Muster screen.</InfoTip>
           {subjects.map((option) => (
             <Choice key={option.value} label={option.label} selected={subject === option.value} onPress={() => setSubject(option.value)} />
           ))}
@@ -84,7 +84,7 @@ export default function HelpScreen() {
             options={shipmates.map((sailor) => ({ value: sailor.id, label: displayName(sailor) }))}
             onChange={setShipmateId}
           />
-          <Note>Type a name, choose a shipmate from your command, or both.</Note>
+          <InfoTip>Type a name, choose a shipmate from your command, or both.</InfoTip>
           {message ? <Note>{message}</Note> : null}
           <PrimaryButton
             label="Next"
@@ -103,7 +103,7 @@ export default function HelpScreen() {
       ) : null}
       {step === 2 ? (
         <>
-          <Note>Crisis and SAPR resources open directly. They do not ask what happened.</Note>
+          <InfoTip>Crisis and SAPR resources open directly. They do not ask what happened.</InfoTip>
           {kinds.map((value) => (
             <Choice key={value} label={SELF_HELP_LABEL[value]} selected={kind === value} onPress={() => chooseKind(value)} />
           ))}

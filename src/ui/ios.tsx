@@ -14,11 +14,9 @@ export function Screen({ children }: { children: ReactNode }) {
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   const { colors } = useTheme();
   return (
-    <View style={{ marginTop: 22 }}>
-      <Text style={{ marginHorizontal: 20, marginBottom: 8, color: colors.muted, fontSize: 13, fontWeight: '600', textTransform: 'uppercase' }}>
-        {title}
-      </Text>
-      <View style={{ marginHorizontal: 16, backgroundColor: colors.card, borderRadius: 12, overflow: 'hidden' }}>{children}</View>
+    <View style={{ marginTop: 22, marginHorizontal: 16, backgroundColor: colors.card, borderRadius: 12, overflow: 'hidden' }}>
+      <Text style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8, color: colors.ink, fontSize: 17, fontWeight: '700' }}>{title}</Text>
+      {children}
     </View>
   );
 }
@@ -304,4 +302,32 @@ export function WarningBanner({ children }: { children: string }) {
 export function Note({ children }: { children: string }) {
   const { colors } = useTheme();
   return <Text style={{ marginHorizontal: 20, marginTop: 12, color: colors.muted, fontSize: 16, lineHeight: 22 }}>{children}</Text>;
+}
+
+export function InfoTip({ label = 'More information', children, inline }: { label?: string; children: string; inline?: boolean }) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={inline ? { flexShrink: 1 } : { marginHorizontal: 16, marginTop: 12 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen((current) => !current)}
+        hitSlop={8}
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 14,
+          borderWidth: 1.5,
+          borderColor: colors.navy,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text style={{ color: colors.navy, fontSize: 15, fontWeight: '700' }}>i</Text>
+      </Pressable>
+      {open ? <Text style={{ color: colors.muted, fontSize: 15, lineHeight: 21, marginTop: 8 }}>{children}</Text> : null}
+    </View>
+  );
 }

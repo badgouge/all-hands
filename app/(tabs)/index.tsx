@@ -1,4 +1,5 @@
-import { Pressable, Switch, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAccountability } from '../../src/app/state/AccountabilityProvider';
@@ -29,16 +30,17 @@ export default function SplashScreen() {
   const unread = api.state.notifications.filter((item) => item.recipientId === api.sailor?.id && !item.readAt).length;
 
   const cards = [
-    { title: 'Muster', detail: formatDateLong(today, api.state.command.timezone), href: '/muster' as const },
-    { title: 'Request Help', detail: 'Myself or a shipmate', href: '/help' as const },
-    { title: 'Family', detail: `${family.count} dependents`, href: '/family' as const },
+    { title: 'Muster', icon: 'checkmark-circle' as const, detail: formatDateLong(today, api.state.command.timezone), href: '/muster' as const },
+    { title: 'Request Help', icon: 'medkit' as const, detail: 'Myself or a shipmate', href: '/help' as const },
+    { title: 'Family', icon: 'people' as const, detail: `${family.count} dependents`, href: '/family' as const },
     {
       title: 'Snivel Log',
+      icon: 'calendar' as const,
       detail: sniv.next ? `Next · ${sniv.next.label} · ${sniv.next.when}` : 'No upcoming sniv',
       href: '/snivel' as const,
     },
-    ...(supervisor ? [{ title: 'Team', detail: 'Work center muster and snivs', href: '/team' as const }] : []),
-    ...(certifier ? [{ title: 'Command Certifier', detail: 'Certify the command muster', href: '/command' as const }] : []),
+    ...(supervisor ? [{ title: 'Team', icon: 'people-circle' as const, detail: 'Work center muster and snivs', href: '/team' as const }] : []),
+    ...(certifier ? [{ title: 'Command Certifier', icon: 'ribbon' as const, detail: 'Certify the command muster', href: '/command' as const }] : []),
   ];
 
   return (
@@ -67,14 +69,18 @@ export default function SplashScreen() {
           />
         </View>
       </View>
-      <Text style={{ marginHorizontal: 20, marginTop: 18, marginBottom: 8, color: colors.ink, fontSize: 20, fontWeight: '700' }}>Command Attributes</Text>
-      <View style={{ marginHorizontal: 16, backgroundColor: colors.card, borderRadius: 14, padding: 16, gap: 10 }}>
-        {organizationAttributes.map((attribute) => (
-          <View key={attribute.kind}>
-            <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600' }}>{attribute.label}</Text>
-            <Text style={{ color: colors.ink, fontSize: 16, marginTop: 2 }}>{attribute.value}</Text>
-          </View>
-        ))}
+      <View style={{ marginTop: 16, marginHorizontal: 16, backgroundColor: colors.card, borderRadius: 14, overflow: 'hidden' }}>
+        <View style={{ paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line }}>
+          <Text style={{ color: colors.ink, fontSize: 17, fontWeight: '700' }}>Command Attributes</Text>
+        </View>
+        <View style={{ padding: 16, gap: 10 }}>
+          {organizationAttributes.map((attribute) => (
+            <View key={attribute.kind}>
+              <Text style={{ color: colors.muted, fontSize: 12, fontWeight: '600' }}>{attribute.label}</Text>
+              <Text style={{ color: colors.ink, fontSize: 16, marginTop: 2 }}>{attribute.value}</Text>
+            </View>
+          ))}
+        </View>
       </View>
       <View style={{ marginTop: 16, marginHorizontal: 16, gap: 12 }}>
         {cards.map((card) => (
@@ -92,6 +98,9 @@ export default function SplashScreen() {
               gap: 12,
             })}
           >
+            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: '#1a4480', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name={card.icon} size={22} color="#FFFFFF" />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: colors.ink, fontSize: 20, fontWeight: '700' }}>{card.title}</Text>
               <Text style={{ color: colors.muted, fontSize: 15, marginTop: 4 }}>{card.detail}</Text>

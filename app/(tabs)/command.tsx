@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { Pressable, Switch, Text, View } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
 import { useAccountability } from '../../src/app/state/AccountabilityProvider';
 import { activeEmergency, currentMuster, hasRole } from '../../src/domain/accountability';
 import { displayName, MUSTER_STATUS_LABEL, MUSTER_STATUS_SHORT } from '../../src/domain/labels';
 import { formatTimestamp, todayInZone } from '../../src/domain/time';
 import type { MusterStatus } from '../../src/domain/types';
 import { useTheme } from '../../src/ui/theme';
-import { ConfirmModal, Dropdown, Note, PrimaryButton, Screen, SecondaryButton } from '../../src/ui/ios';
+import { ConfirmModal, Dropdown, InfoTip, Note, PrimaryButton, Screen } from '../../src/ui/ios';
 
 const statusOptions = (Object.keys(MUSTER_STATUS_LABEL) as MusterStatus[]).map((value) => ({
   value,
@@ -16,7 +15,6 @@ const statusOptions = (Object.keys(MUSTER_STATUS_LABEL) as MusterStatus[]).map((
 
 export default function CommandScreen() {
   const api = useAccountability();
-  const router = useRouter();
   const { colors } = useTheme();
   const [ask, setAsk] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,19 +52,18 @@ export default function CommandScreen() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Stack.Screen options={{ title: 'Command Certifier', headerBackButtonDisplayMode: 'minimal' }} />
       <Screen>
-        <SecondaryButton
-          label="All Hands"
-          chevron="back"
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-        />
         <Note>
           {confirmed} of {rows.length} confirmed.{outstanding.length > 0 ? ` ${outstanding.length} still outstanding.` : ' The command is fully confirmed.'}
         </Note>
         <View style={{ marginHorizontal: 16, marginTop: 16, backgroundColor: colors.card, borderRadius: 12, padding: 16, gap: 10 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <Text style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flex: 1 }}>Navy accountability</Text>
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ color: colors.ink, fontSize: 16, fontWeight: '600', flexShrink: 1 }}>Navy accountability</Text>
+              <InfoTip inline>
+                Turning this on sends a push notification to every Sailor in the command. Each Sailor must validate their own status and their family’s status.
+              </InfoTip>
+            </View>
             <Switch
               accessibilityLabel="Navy accountability"
               value={Boolean(commandEvent)}
@@ -77,14 +74,11 @@ export default function CommandScreen() {
               trackColor={{ false: colors.line, true: colors.green }}
             />
           </View>
-          <Text style={{ color: colors.muted, fontSize: 15, lineHeight: 21 }}>
-            Turning this on sends a push notification to every Sailor in the command. Each Sailor must validate their own status and their family’s status.
-          </Text>
         </View>
         {divisions.map((division) => (
-          <View key={division} style={{ marginTop: 18 }}>
-            <Text style={{ marginHorizontal: 20, marginBottom: 8, color: colors.muted, fontSize: 13, fontWeight: '600' }}>{division.toUpperCase()}</Text>
-            <View style={{ marginHorizontal: 16, backgroundColor: colors.card, borderRadius: 12 }}>
+          <View key={division} style={{ marginTop: 18, marginHorizontal: 16, backgroundColor: colors.card, borderRadius: 12, overflow: 'hidden' }}>
+            <Text style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4, color: colors.ink, fontSize: 13, fontWeight: '700' }}>{division.toUpperCase()}</Text>
+            <View>
               {rows.filter((row) => row.division === division).map((row, index, list) => (
                 <View key={row.id} style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: index < list.length - 1 ? 1 : 0, borderBottomColor: colors.line }}>
                   <Text style={{ color: colors.ink, fontSize: 17, fontWeight: '600' }}>{row.name}</Text>

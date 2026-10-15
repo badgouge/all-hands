@@ -9,7 +9,7 @@ import { MUSTER_STATUS_LABEL, MUSTER_STATUS_SHORT } from '../../src/domain/label
 import { formatDateLong, formatMilitary, todayInZone } from '../../src/domain/time';
 import type { LateReason, MusterStatus } from '../../src/domain/types';
 import { useTheme } from '../../src/ui/theme';
-import { Dropdown, Field, Note, PrimaryButton, Row, Screen, Section } from '../../src/ui/ios';
+import { Dropdown, Field, InfoTip, Note, PrimaryButton, Row, Screen, Section } from '../../src/ui/ios';
 
 const options = (Object.keys(MUSTER_STATUS_LABEL) as MusterStatus[]).map((value) => ({
   value,
@@ -53,7 +53,7 @@ export default function MusterScreen() {
           </View>
         </View>
         <Text style={{ marginHorizontal: 20, marginTop: 6, color: colors.muted, fontSize: 17, fontWeight: '600' }}>Muster by {musterBy}</Text>
-        <Note>A muster is required every 24 hours. Weekends and holidays are not required unless your supervisor includes them.</Note>
+        <InfoTip>A muster is required every 24 hours. Weekends and holidays are not required unless your supervisor includes them.</InfoTip>
         <Section title="Today">
           <Row title={record ? MUSTER_STATUS_SHORT[record.status] : muster.label} detail={muster.detail} last />
         </Section>

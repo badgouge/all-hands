@@ -5,7 +5,7 @@ import { familyEventFor, listDependents } from '../../src/domain/accountability'
 import { FAMILY_STATUS_LABEL, RELATIONSHIP_LABEL } from '../../src/domain/labels';
 import type { FamilyStatus, ShareLocation } from '../../src/domain/types';
 import { useTheme } from '../../src/ui/theme';
-import { Dropdown, Field, Note, PrimaryButton, Row, Screen, Section, TextButton } from '../../src/ui/ios';
+import { Dropdown, Field, InfoTip, Note, PrimaryButton, Row, Screen, Section, TextButton } from '../../src/ui/ios';
 import { FamilyHelpWizard } from '../../src/ui/wizards';
 
 type Reportable = Exclude<FamilyStatus, 'NOT_REPORTED'>;
@@ -50,9 +50,13 @@ export default function FamilyScreen() {
   return (
     <View style={{ flex: 1 }}>
     <Screen>
-      {event?.origin === 'COMMAND' ? <Note>The Navy opened accountability for the command. Report each dependent, or account for the whole family.</Note> : null}
-      {event?.origin === 'SAILOR' ? <Note>You opened a request for help. Report each dependent, or account for the whole family.</Note> : null}
-      {!event ? <Note>Request help if you need to account for your dependents, or wait for the Navy to open accountability.</Note> : null}
+      {event?.origin === 'COMMAND' ? (
+        <InfoTip>The Navy opened accountability for the command. Report each dependent, or account for the whole family.</InfoTip>
+      ) : null}
+      {event?.origin === 'SAILOR' ? (
+        <InfoTip>You opened a request for help. Report each dependent, or account for the whole family.</InfoTip>
+      ) : null}
+      {!event ? <InfoTip>Request help if you need to account for your dependents, or wait for the Navy to open accountability.</InfoTip> : null}
       <PrimaryButton label="Request Help for My Family" onPress={() => setHelpOpen(true)} />
 
       <View style={{ marginHorizontal: 16, marginTop: 18, backgroundColor: colors.card, borderRadius: 12, paddingBottom: 8 }}>
@@ -174,7 +178,7 @@ export default function FamilyScreen() {
                     multiline
                   />
                   <PrimaryButton
-                    label="Submit Status"
+                    label="Submit Individual Status"
                     onPress={() => {
                       const result = api.submitDependentStatus(
                         person.id,

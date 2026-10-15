@@ -3,7 +3,7 @@ import { Pressable, Switch, Text, View } from 'react-native';
 import { useAccountability } from '../../src/app/state/AccountabilityProvider';
 import { rosterScope } from '../../src/domain/accountability';
 import { useTheme } from '../../src/ui/theme';
-import { Field, Note, PrimaryButton, Screen } from '../../src/ui/ios';
+import { Field, InfoTip, Note, PrimaryButton, Screen } from '../../src/ui/ios';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -32,11 +32,13 @@ export default function SettingsScreen() {
 
   return (
     <Screen>
-      <Note>Muster is required every 24 hours on the days you select. Weekends and holidays stay off unless you turn them on.</Note>
-      <Text style={{ marginTop: 18, marginHorizontal: 20, color: colors.muted, fontSize: 13, fontWeight: '600' }}>MUSTER BY</Text>
-      <Field value={musterBy} onChangeText={setMusterBy} placeholder="HH:MM" />
-      <Text style={{ marginTop: 18, marginHorizontal: 20, color: colors.muted, fontSize: 13, fontWeight: '600' }}>REQUIRED DAYS</Text>
-      <View style={{ marginHorizontal: 16, marginTop: 8, backgroundColor: colors.card, borderRadius: 12 }}>
+      <InfoTip>Muster is required every 24 hours on the days you select. Weekends and holidays stay off unless you turn them on.</InfoTip>
+      <View style={{ marginTop: 18, marginHorizontal: 16, backgroundColor: colors.card, borderRadius: 12, paddingBottom: 8 }}>
+        <Text style={{ paddingHorizontal: 16, paddingTop: 14, color: colors.ink, fontSize: 17, fontWeight: '700' }}>Muster by</Text>
+        <Field value={musterBy} onChangeText={setMusterBy} placeholder="HH:MM" />
+      </View>
+      <View style={{ marginHorizontal: 16, marginTop: 18, backgroundColor: colors.card, borderRadius: 12 }}>
+        <Text style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4, color: colors.ink, fontSize: 17, fontWeight: '700' }}>Required days</Text>
         {DAYS.map((label, day) => (
           <View
             key={label}
@@ -60,8 +62,8 @@ export default function SettingsScreen() {
           </View>
         ))}
       </View>
-      <Text style={{ marginTop: 18, marginHorizontal: 20, color: colors.muted, fontSize: 13, fontWeight: '600' }}>HOLIDAYS</Text>
-      <View style={{ marginHorizontal: 16, marginTop: 8, backgroundColor: colors.card, borderRadius: 12 }}>
+      <View style={{ marginHorizontal: 16, marginTop: 18, backgroundColor: colors.card, borderRadius: 12 }}>
+        <Text style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 4, color: colors.ink, fontSize: 17, fontWeight: '700' }}>Holidays</Text>
         {holidays.length === 0 ? <Note>No holidays on the calendar.</Note> : holidays.map((day) => (
           <View key={day} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12 }}>
             <Text style={{ color: colors.ink, fontSize: 17 }}>{day}</Text>

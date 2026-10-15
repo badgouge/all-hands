@@ -7,7 +7,7 @@ import { MUSTER_STATUS_LABEL } from '../../src/domain/labels';
 import { workCenterQueue } from '../../src/domain/viewModels';
 import type { MusterStatus } from '../../src/domain/types';
 import { useTheme } from '../../src/ui/theme';
-import { ConfirmModal, Dropdown, Note, PrimaryButton, Screen } from '../../src/ui/ios';
+import { ConfirmModal, Dropdown, InfoTip, Note, PrimaryButton, Screen } from '../../src/ui/ios';
 
 const statusOptions = (Object.keys(MUSTER_STATUS_LABEL) as MusterStatus[]).map((value) => ({
   value,
@@ -38,7 +38,7 @@ export default function TeamScreen() {
   return (
     <View style={{ flex: 1 }}>
     <Screen>
-      <Note>Turn a Sailor on or off to include them. Approve work center is what confirms those musters. The switch does not approve by itself. Open a Sailor to review snivs.</Note>
+      <InfoTip>Turn a Sailor on or off to include them. Approve work center is what confirms those musters. The switch does not approve by itself. Open a Sailor to review snivs.</InfoTip>
       <View style={{ marginTop: 16, marginHorizontal: 16, backgroundColor: colors.card, borderRadius: 12, overflow: 'hidden' }}>
         {members.map((member, index) => {
           return (
