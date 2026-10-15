@@ -34,7 +34,7 @@ export function DashboardPage() {
       <Card>
         <CardHeader><CardTitle>Snivel Log</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          <p>{sniv.next ? `Next approved absence: ${sniv.next.label}, ${sniv.next.when}` : 'No upcoming approved absence.'}</p>
+          <p>{sniv.next ? `Next · ${sniv.next.label}, ${sniv.next.when}` : 'No upcoming sniv.'}</p>
           <p>{sniv.pending} pending {sniv.pending === 1 ? 'request' : 'requests'}</p>
           {sniv.returned > 0 ? <p>Your supervisor asked for more information on {sniv.returned} request.</p> : null}
           <div className="flex flex-col gap-2">

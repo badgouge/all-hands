@@ -1,3 +1,4 @@
+import { LATE_REASON_LABEL, summarizeFamilyHelp, summarizeSelfHelp } from './help';
 import { displayName, SNIV_CATEGORY_LABEL } from './labels';
 import { prototypePush } from './ports';
 import {
@@ -15,10 +16,17 @@ import type {
   AppNotification,
   AuditEvent,
   Command,
+  CommandCertification,
   DomainDeps,
   EmergencyEvent,
   FamilyAccountabilityRecord,
+  FamilyHelpKind,
+  FamilyHelpRequest,
+  HelpSubject,
+  LateReason,
   FamilyMemberReport,
+  FamilyStatus,
+  WorkCenterSettingsInput,
   MusterPeriod,
   MusterRecord,
   MusterStatus,
@@ -30,6 +38,9 @@ import type {
   PrototypeState,
   Result,
   Sailor,
+  SelfHelpKind,
+  SelfHelpRequest,
+  ShareLocation,
   SnivInput,
   SnivRequest,
   SnivStatus,
@@ -37,8 +48,6 @@ import type {
   SyncState,
 } from './types';
 import { SOURCE_APPLICATION } from './types';
-
-const SELF_MUSTER = new Set<MusterStatus>(['PRESENT', 'TELEWORK', 'SICK', 'UNABLE_TO_REPORT']);
 
 export function fail(error: string): Mutation {
   return { ok: false, error };
@@ -198,7 +207,13 @@ export function currentMuster(state: PrototypeState, sailorId: string, isoDate: 
   return state.musters.find((record) => record.sailorId === sailorId && record.reportingDate === isoDate);
 }
 
-export function submitMuster(state: PrototypeState, actor: Sailor, status: MusterStatus, deps: DomainDeps): Mutation {
+export function submitMuster(
+  state: PrototypeState,
+  actor: Sailor,
+  status: MusterStatus,
+  deps: DomainDeps,
+  late?: { reason: LateReason; note: string } | null,
+): Mutation {
   const timeZone = state.command.timezone;
   const today = todayInZone(timeZone, deps.now());
   const period = periodForDate(state, today);
@@ -226,8 +241,11 @@ export function submitMuster(state: PrototypeState, actor: Sailor, status: Muste
     return fail('Your command is not accepting muster corrections from the phone.');
   }
 
-  const origin = status === 'APPROVED_LEAVE' || status === 'TAD' ? 'SYSTEM_DERIVED' : 'SAILOR_REPORTED';
-  const source: SourceSystem = origin === 'SYSTEM_DERIVED' ? (status === 'TAD' ? 'PERSONNEL_SERVICE' : 'LEAVE_SYSTEM') : 'SAILOR_ATTESTATION';
+  const lateNote = late?.note.trim() ?? '';
+  if (late?.reason === 'OTHER' && lateNote.length < 3) return fail('Say why you are running late.');
+  const runningLate = late ? `Running late. ${LATE_REASON_LABEL[late.reason]}${lateNote ? `. ${lateNote}` : ''}` : null;
+  const origin = 'SAILOR_REPORTED' as const;
+  const source: SourceSystem = 'SAILOR_ATTESTATION';
   const syncState: SyncState = deps.online ? 'RECEIVED_BY_SERVICE' : 'QUEUED_FOR_SUBMISSION';
   const verification: MusterVerification = deps.online ? 'AWAITING_VERIFICATION' : 'NOT_SUBMITTED';
   const at = stamp(deps);
@@ -238,7 +256,7 @@ export function submitMuster(state: PrototypeState, actor: Sailor, status: Muste
     type: existing ? 'CORRECTED' as const : 'SUBMITTED' as const,
     status,
     verification,
-    note: phase === 'LATE' ? 'Reported after the primary deadline.' : null,
+    note: [phase === 'LATE' ? 'Reported after the primary deadline.' : null, runningLate].filter(Boolean).join(' ') || null,
     source,
     idempotencyKey: key,
   };
@@ -275,8 +293,35 @@ export function submitMuster(state: PrototypeState, actor: Sailor, status: Muste
     entityId: record.id,
     previousState: existing ? businessMusterState(existing) : null,
     newState: businessMusterState(record),
-    metadata: { late: phase === 'LATE' ? 'true' : 'false', idempotencyKey: key },
+    metadata: { late: phase === 'LATE' || Boolean(late) ? 'true' : 'false', idempotencyKey: key, lateReason: late?.reason ?? '' },
   });
+  if (late && runningLate) {
+    const supervisor = supervisorFor(next, actor.id);
+    next = {
+      ...next,
+      lateReports: [
+        {
+          id: deps.id('late'),
+          sailorId: actor.id,
+          reportingDate: today,
+          reason: late.reason,
+          note: lateNote,
+          createdAt: at,
+        },
+        ...(next.lateReports ?? []),
+      ],
+    };
+    if (supervisor) {
+      next = pushNotification(next, deps, {
+        recipientId: supervisor.id,
+        kind: 'MUSTER_DEADLINE',
+        title: 'Sailor running late',
+        body: `${displayName(actor)} is running late. ${LATE_REASON_LABEL[late.reason]}.`,
+        href: '/team',
+        pushEligible: true,
+      });
+    }
+  }
   if (!deps.online) {
     next = queue(next, deps, {
       idempotencyKey: key,
@@ -294,23 +339,8 @@ export function submitMuster(state: PrototypeState, actor: Sailor, status: Muste
   return { ok: true, state: next, message, entityId: record.id };
 }
 
-function sailorMaySelect(state: PrototypeState, actor: Sailor, status: MusterStatus): string | null {
-  if (SELF_MUSTER.has(status)) return null;
-  const duty = assignmentFor(state, actor.id)?.dutyStatus;
-  if (status === 'TAD') {
-    return duty === 'TAD'
-      ? null
-      : 'Temporary duty is reported by the personnel system. You cannot assign it yourself.';
-  }
-  if (status === 'APPROVED_LEAVE') {
-    return duty === 'LEAVE'
-      ? null
-      : 'Approved leave is reported by the leave system. You cannot assign it yourself.';
-  }
-  if (status === 'AUTHORIZED_ABSENCE') {
-    return 'You cannot classify your own absence as approved. An approved request is shown for information and does not complete muster.';
-  }
-  return 'That status cannot be submitted.';
+function sailorMaySelect(_state: PrototypeState, _actor: Sailor, _status: MusterStatus): string | null {
+  return null;
 }
 
 function receivedMuster(record: MusterRecord): string | null {
@@ -324,6 +354,16 @@ export function verifyMuster(state: PrototypeState, actor: Sailor, recordId: str
   const record = state.musters.find((item) => item.id === recordId);
   if (!record) return fail('Muster record not found.');
   if (!canVerifyMuster(state, actor, record.sailorId)) return fail('You are not authorized to verify this muster.');
+  return completeVerification(state, actor, record, deps, null);
+}
+
+function completeVerification(
+  state: PrototypeState,
+  actor: Sailor,
+  record: MusterRecord,
+  deps: DomainDeps,
+  note: string | null,
+): Mutation {
   const blocked = receivedMuster(record);
   if (blocked) return fail(blocked);
   if (record.verification === 'VERIFIED') {
@@ -346,7 +386,7 @@ export function verifyMuster(state: PrototypeState, actor: Sailor, recordId: str
         type: 'VERIFIED',
         status: record.status,
         verification: 'VERIFIED',
-        note: null,
+        note,
         source: 'MUSTER_SERVICE',
         idempotencyKey: record.idempotencyKey,
       },
@@ -430,6 +470,260 @@ export function approveWorkCenter(state: PrototypeState, actor: Sailor, deps: Do
   return { ok: true, state: next, message: `Work center approved. ${parts.join(' and ')}.${held}` };
 }
 
+export function confirmWorkCenter(state: PrototypeState, actor: Sailor, deps: DomainDeps, sailorIds?: string[]): Mutation {
+  if (rosterScope(actor) === 'NONE') return fail('You are not authorized to confirm a work center.');
+  const reports = directReports(state, actor.id);
+  const roster = [actor, ...reports.filter((sailor) => sailor.id !== actor.id)];
+  const targets = sailorIds ? roster.filter((sailor) => sailorIds.includes(sailor.id)) : reports;
+  if (targets.length === 0) {
+    return fail(sailorIds ? 'Select at least one Sailor to approve.' : 'No Sailors are assigned to your work center.');
+  }
+  const today = todayInZone(state.command.timezone, deps.now());
+  let next = state;
+  let musters = 0;
+  const notMustered: string[] = [];
+
+  for (const sailor of targets) {
+    const record = currentMuster(next, sailor.id, today);
+    if (!record) {
+      notMustered.push(displayName(sailor));
+      continue;
+    }
+    if (record.verification !== 'AWAITING_VERIFICATION') continue;
+    if (record.syncState === 'QUEUED_FOR_SUBMISSION' || record.syncState === 'SAVED_ON_DEVICE') continue;
+    const result =
+      sailor.id === actor.id
+        ? completeVerification(next, actor, record, deps, 'Included in the work center approval.')
+        : verifyMuster(next, actor, record.id, deps);
+    if (!result.ok) return result;
+    next = result.state;
+    musters += 1;
+  }
+
+  if (musters === 0) {
+    return fail(
+      notMustered.length > 0
+        ? `No musters are waiting. ${notMustered.join(', ')} ${notMustered.length === 1 ? 'has' : 'have'} not mustered.`
+        : 'No musters are waiting for confirmation.',
+    );
+  }
+
+  const held =
+    notMustered.length > 0
+      ? ` ${notMustered.join(', ')} ${notMustered.length === 1 ? 'has' : 'have'} not mustered and ${notMustered.length === 1 ? 'was' : 'were'} left in the queue.`
+      : '';
+  return {
+    ok: true,
+    state: next,
+    message: `Work center approved. ${musters} muster${musters === 1 ? '' : 's'} confirmed.${held}`,
+  };
+}
+
+export function musterOnBehalf(
+  state: PrototypeState,
+  actor: Sailor,
+  sailorId: string,
+  status: MusterStatus,
+  deps: DomainDeps,
+): Mutation {
+  if (!canVerifyMuster(state, actor, sailorId)) return fail('You are not authorized to muster on behalf of this Sailor.');
+  const sailor = sailorById(state, sailorId);
+  if (!sailor) return fail('Sailor not found.');
+  const timeZone = state.command.timezone;
+  const today = todayInZone(timeZone, deps.now());
+  const period = periodForDate(state, today);
+  if (!period) return fail('No muster period is open for today.');
+  const phase = periodPhase(period, deps.now(), timeZone, deps.forceDutyDay);
+  if (phase === 'NOT_REQUIRED') return fail('Muster is not required today.');
+  if (phase === 'UPCOMING' || phase === 'CLOSED') return fail('The muster window is not open.');
+  if (currentMuster(state, sailorId, today)) return fail('This Sailor already has a muster for today.');
+
+  const at = stamp(deps);
+  const key = musterKey(sailorId, period.id, status);
+  const note = `Mustered on behalf of the Sailor by ${displayName(actor)}.`;
+  const record: MusterRecord = {
+    id: deps.id('muster'),
+    sailorId,
+    commandId: sailor.commandId,
+    uic: state.command.uic,
+    periodId: period.id,
+    reportingDate: today,
+    status,
+    statusOrigin: 'SAILOR_REPORTED',
+    sourceSystem: 'MUSTER_SERVICE',
+    linkedSnivRequestId: null,
+    submittedAt: at,
+    verification: 'VERIFIED',
+    verificationActorId: actor.id,
+    verifiedAt: at,
+    syncState: 'VERIFIED_BY_COMMAND',
+    idempotencyKey: key,
+    createdAt: at,
+    updatedAt: at,
+    events: [
+      {
+        id: deps.id('muster-event'),
+        at,
+        actorId: actor.id,
+        type: 'SUPERVISOR_CORRECTION',
+        status,
+        verification: 'VERIFIED',
+        note,
+        source: 'MUSTER_SERVICE',
+        idempotencyKey: key,
+      },
+    ],
+  };
+  let next: PrototypeState = { ...state, musters: [record, ...state.musters] };
+  next = pushAudit(next, deps, {
+    actorId: actor.id,
+    onBehalfOfId: sailorId,
+    action: 'MUSTER_ON_BEHALF',
+    entityType: 'MusterRecord',
+    entityId: record.id,
+    previousState: null,
+    newState: businessMusterState(record),
+    metadata: { note },
+  });
+  next = pushNotification(next, deps, {
+    recipientId: sailorId,
+    kind: 'MUSTER_VERIFIED',
+    title: 'Muster recorded for you',
+    body: 'Your supervisor recorded today’s muster on your behalf.',
+    href: '/muster',
+    pushEligible: true,
+  });
+  return { ok: true, state: next, message: `Muster recorded on behalf of ${displayName(sailor)}.`, entityId: record.id };
+}
+
+export function overrideMuster(
+  state: PrototypeState,
+  actor: Sailor,
+  sailorId: string,
+  status: MusterStatus,
+  deps: DomainDeps,
+): Mutation {
+  if (!hasRole(actor, 'COMMAND_CERTIFIER')) return fail('Only the command certifier can override a muster.');
+  if (actor.id === sailorId) return fail('You cannot override your own muster.');
+  const sailor = sailorById(state, sailorId);
+  if (!sailor || sailor.commandId !== actor.commandId) return fail('Choose a Sailor in your command.');
+  const timeZone = state.command.timezone;
+  const today = todayInZone(timeZone, deps.now());
+  const existing = currentMuster(state, sailorId, today);
+  const at = stamp(deps);
+  const note = `Overridden by the command certifier, ${displayName(actor)}.`;
+
+  if (!existing) {
+    const period = periodForDate(state, today);
+    if (!period) return fail('No muster period is open for today.');
+    const phase = periodPhase(period, deps.now(), timeZone, deps.forceDutyDay);
+    if (phase === 'NOT_REQUIRED') return fail('Muster is not required today.');
+    if (phase === 'UPCOMING' || phase === 'CLOSED') return fail('The muster window is not open.');
+    const key = musterKey(sailorId, period.id, status);
+    const record: MusterRecord = {
+      id: deps.id('muster'),
+      sailorId,
+      commandId: sailor.commandId,
+      uic: state.command.uic,
+      periodId: period.id,
+      reportingDate: today,
+      status,
+      statusOrigin: 'SAILOR_REPORTED',
+      sourceSystem: 'MUSTER_SERVICE',
+      linkedSnivRequestId: null,
+      submittedAt: at,
+      verification: 'VERIFIED',
+      verificationActorId: actor.id,
+      verifiedAt: at,
+      syncState: 'VERIFIED_BY_COMMAND',
+      idempotencyKey: key,
+      createdAt: at,
+      updatedAt: at,
+      events: [
+        {
+          id: deps.id('muster-event'),
+          at,
+          actorId: actor.id,
+          type: 'CERTIFIER_OVERRIDE',
+          status,
+          verification: 'VERIFIED',
+          note,
+          source: 'MUSTER_SERVICE',
+          idempotencyKey: key,
+        },
+      ],
+    };
+    let created: PrototypeState = { ...state, musters: [record, ...state.musters] };
+    created = pushAudit(created, deps, {
+      actorId: actor.id,
+      onBehalfOfId: sailorId,
+      action: 'MUSTER_CERTIFIER_OVERRIDE',
+      entityType: 'MusterRecord',
+      entityId: record.id,
+      previousState: null,
+      newState: businessMusterState(record),
+      metadata: { note },
+    });
+    created = pushNotification(created, deps, {
+      recipientId: sailorId,
+      kind: 'MUSTER_VERIFIED',
+      title: 'Muster overridden',
+      body: 'The command certifier recorded today’s muster for you. Open All Hands to review it.',
+      href: '/muster',
+      pushEligible: true,
+    });
+    return { ok: true, state: created, message: `Muster recorded for ${displayName(sailor)}.`, entityId: record.id };
+  }
+
+  const blocked = receivedMuster(existing);
+  if (blocked) return fail(blocked);
+  const key = musterKey(existing.sailorId, existing.periodId, status);
+  const nextRecord: MusterRecord = {
+    ...existing,
+    status,
+    verification: 'VERIFIED',
+    verificationActorId: actor.id,
+    verifiedAt: at,
+    syncState: 'VERIFIED_BY_COMMAND',
+    idempotencyKey: key,
+    updatedAt: at,
+    events: [
+      ...existing.events,
+      {
+        id: deps.id('muster-event'),
+        at,
+        actorId: actor.id,
+        type: 'CERTIFIER_OVERRIDE',
+        status,
+        verification: 'VERIFIED',
+        note,
+        source: 'MUSTER_SERVICE',
+        idempotencyKey: key,
+      },
+    ],
+  };
+  let next = replaceMuster(state, nextRecord);
+  next = pushAudit(next, deps, {
+    actorId: actor.id,
+    onBehalfOfId: sailorId,
+    action: 'MUSTER_CERTIFIER_OVERRIDE',
+    entityType: 'MusterRecord',
+    entityId: existing.id,
+    previousState: businessMusterState(existing),
+    newState: businessMusterState(nextRecord),
+    metadata: { note },
+  });
+  next = pushNotification(next, deps, {
+    recipientId: sailorId,
+    kind: 'MUSTER_VERIFIED',
+    title: 'Muster overridden',
+    body: 'The command certifier updated today’s muster. Open All Hands to review it.',
+    href: '/muster',
+    pushEligible: true,
+  });
+  return { ok: true, state: next, message: `Muster overridden for ${displayName(sailor)}.`, entityId: existing.id };
+}
+
 export function flagMuster(state: PrototypeState, actor: Sailor, recordId: string, reason: string, deps: DomainDeps): Mutation {
   const note = reason.trim();
   if (note.length < 4) return fail('Enter a reason for the discrepancy.');
@@ -476,7 +770,7 @@ export function flagMuster(state: PrototypeState, actor: Sailor, recordId: strin
     recipientId: record.sailorId,
     kind: 'MUSTER_DISCREPANCY',
     title: 'Muster needs attention',
-    body: 'Your command flagged today’s muster. Open Accountability to review the status.',
+    body: 'Your command flagged today’s muster. Open All Hands to review the status.',
     href: '/muster',
     pushEligible: true,
   });
@@ -540,7 +834,7 @@ export function correctMuster(
     recipientId: record.sailorId,
     kind: 'MUSTER_DISCREPANCY',
     title: 'Muster updated by your command',
-    body: 'Your command corrected today’s muster. Open Accountability to review it.',
+    body: 'Your command corrected today’s muster. Open All Hands to review it.',
     href: '/muster',
     pushEligible: true,
   });
@@ -575,8 +869,45 @@ export function saveSnivDraft(state: PrototypeState, actor: Sailor, input: SnivI
   return built;
 }
 
+function expandSnivDates(timeZone: string, input: SnivInput): { dates: string[] } | { error: string } {
+  const mode = input.recurrence ?? 'NONE';
+  if (mode === 'NONE' || input.requestId) return { dates: [input.date] };
+  if (!input.untilDate) return { error: 'Enter an until date for a recurring sniv.' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.untilDate)) return { error: 'Use YYYY-MM-DD for the until date.' };
+  if (input.untilDate < input.date) return { error: 'The until date must be on or after the start date.' };
+  const dates: string[] = [];
+  const step = mode === 'WEEKLY' ? 7 : 1;
+  let cursor = input.date;
+  while (cursor <= input.untilDate) {
+    const weekday = weekdayIndex(cursor, timeZone);
+    const include = mode === 'DAILY' || mode === 'WEEKLY' || (weekday >= 1 && weekday <= 5);
+    if (include) {
+      if (dates.length === 16) return { error: 'A recurring sniv can include up to 16 dates. Shorten the until date.' };
+      dates.push(cursor);
+    }
+    cursor = addDays(cursor, step);
+  }
+  if (dates.length === 0) return { error: 'No dates fall in that recurrence.' };
+  return { dates };
+}
+
 export function submitSniv(state: PrototypeState, actor: Sailor, input: SnivInput, deps: DomainDeps): Mutation {
-  return buildSniv(state, actor, input, 'PENDING_APPROVAL', deps);
+  const expanded = expandSnivDates(state.command.timezone, input);
+  if ('error' in expanded) return fail(expanded.error);
+  if (expanded.dates.length === 1) return buildSniv(state, actor, input, 'PENDING_APPROVAL', deps);
+  let next = state;
+  for (const date of expanded.dates) {
+    const result = buildSniv(
+      next,
+      actor,
+      { ...input, date, endDate: date, requestId: undefined, recurrence: 'NONE', untilDate: undefined },
+      'PENDING_APPROVAL',
+      deps,
+    );
+    if (!result.ok) return result;
+    next = result.state;
+  }
+  return { ok: true, state: next, message: `Submitted ${expanded.dates.length} sniv requests for approval.` };
 }
 
 function buildSniv(
@@ -587,6 +918,9 @@ function buildSniv(
   deps: DomainDeps,
 ): Mutation {
   if (!state.command.snivCategories.includes(input.category)) return fail('That category is not available for your command.');
+  const categoryNote = input.categoryNote?.trim() ?? '';
+  if (input.category === 'OTHER' && categoryNote.length < 3) return fail('Describe the other category.');
+  if (categoryNote.length > 80) return fail('Keep the other category under 80 characters.');
   const planned = planAbsence(state, input);
   if ('error' in planned) return fail(planned.error);
   if (input.remarks.trim().length > 240) return fail('Keep remarks under 240 characters. Do not include medical details.');
@@ -631,6 +965,7 @@ function buildSniv(
     endTime: input.endTime,
     durationMinutes: planned.minutes,
     remarks: input.remarks.trim(),
+    categoryNote: categoryNote || undefined,
     status: target,
     createdAt: existing?.createdAt ?? at,
     updatedAt: at,
@@ -840,7 +1175,453 @@ export function listDependents(state: PrototypeState, actor: Sailor, sponsorId: 
 }
 
 export function activeEmergency(state: PrototypeState): EmergencyEvent | undefined {
-  return state.emergencies.find((event) => event.active && event.commandIds.includes(state.command.id));
+  return state.emergencies.find((event) => event.active && event.origin !== 'SAILOR' && event.commandIds.includes(state.command.id));
+}
+
+export function familyEventFor(state: PrototypeState, sponsorId: string): EmergencyEvent | undefined {
+  return (
+    activeEmergency(state) ??
+    state.emergencies.find((event) => event.active && event.origin === 'SAILOR' && event.sponsorId === sponsorId)
+  );
+}
+
+export function updateDependentContact(
+  state: PrototypeState,
+  actor: Sailor,
+  dependentId: string,
+  phone: string,
+  address: string,
+): Mutation {
+  const nextPhone = phone.trim();
+  const nextAddress = address.trim();
+  if (nextPhone.length < 7) return fail('Enter a phone number for this dependent.');
+  if (nextAddress.length < 8) return fail('Enter a street address for this dependent.');
+  const dependent = state.dependents.find((item) => item.id === dependentId);
+  if (!dependent) return fail('Dependent not found.');
+  if (dependent.sponsorId !== actor.id) return fail('You can edit contact information only for your own dependents.');
+  return {
+    ok: true,
+    state: {
+      ...state,
+      dependents: state.dependents.map((item) =>
+        item.id === dependentId
+          ? { ...item, phone: nextPhone, address: nextAddress, contactSummary: `${nextPhone} · ${nextAddress}` }
+          : item,
+      ),
+    },
+    message: 'Contact information saved.',
+    entityId: dependentId,
+  };
+}
+
+export function submitDependentStatus(
+  state: PrototypeState,
+  actor: Sailor,
+  dependentId: string,
+  status: Exclude<FamilyStatus, 'NOT_REPORTED'>,
+  location: string,
+  remarks: string,
+  deps: DomainDeps,
+): Mutation {
+  const event = familyEventFor(state, actor.id);
+  if (!event) return fail('Open a request for help, or wait for the Navy to open accountability, before submitting status.');
+  const mine = state.dependents.filter((item) => item.sponsorId === actor.id);
+  const target = mine.find((item) => item.id === dependentId);
+  if (!target) return fail('Dependent not found.');
+  const area = location.trim();
+  const note = remarks.trim();
+  if (area.length < 2) return fail('Enter the address the command should use for this dependent.');
+  if (note.length > 280) return fail('Keep remarks under 280 characters.');
+  const dependents = state.dependents.map((item) =>
+    item.id === dependentId ? { ...item, currentStatus: status, statusLocation: area, address: area } : item,
+  );
+  const members: FamilyMemberReport[] = mine.map((person) => {
+    const current = person.id === dependentId ? status : (person.currentStatus ?? 'UNKNOWN');
+    const general = person.id === dependentId ? area : (person.statusLocation ?? person.address ?? '');
+    const needsLocation = current === 'DISPLACED' || current === 'NEEDS_ASSISTANCE';
+    return {
+      dependentId: person.id,
+      status: current,
+      generalLocation: needsLocation ? general || null : general || null,
+      safeContact: null,
+      needs: current === 'NEEDS_ASSISTANCE' ? ['OTHER'] : [],
+      context: person.id === dependentId ? note : '',
+    };
+  });
+  const missing = members.find((member) => (member.status === 'DISPLACED' || member.status === 'NEEDS_ASSISTANCE') && !member.generalLocation);
+  if (missing) {
+    const person = mine.find((item) => item.id === missing.dependentId);
+    return fail(`Enter a general area for ${person?.firstName ?? 'each dependent'} before submitting.`);
+  }
+  return submitFamily({ ...state, dependents }, actor, event.id, members, deps);
+}
+
+export function updateWorkCenterSettings(
+  state: PrototypeState,
+  actor: Sailor,
+  input: WorkCenterSettingsInput,
+  deps: DomainDeps,
+): Mutation {
+  if (rosterScope(actor) === 'NONE') return fail('Only a supervisor can change work center settings.');
+  if (!/^\d{2}:\d{2}$/.test(input.musterBy)) return fail('Enter the muster time as HH:MM.');
+  const [hour, minute] = input.musterBy.split(':').map(Number);
+  if (hour > 23 || minute > 59 || Number.isNaN(hour) || Number.isNaN(minute)) return fail('Enter a valid muster time.');
+  const dutyDays = [...new Set(input.dutyDays)].filter((day) => day >= 0 && day <= 6).sort((a, b) => a - b);
+  if (dutyDays.length === 0) return fail('Select at least one day that requires muster.');
+  const holidays = [...new Set(input.holidays.map((day) => day.trim()))].filter(Boolean).sort();
+  if (holidays.some((day) => !/^\d{4}-\d{2}-\d{2}$/.test(day))) return fail('Enter holidays as YYYY-MM-DD.');
+
+  const command: Command = {
+    ...state.command,
+    musterPolicy: {
+      ...state.command.musterPolicy,
+      primaryWindowEnd: input.musterBy,
+      dutyDays,
+      holidays,
+    },
+  };
+  const periods = state.periods.map((period) => makePeriod(command, period.reportingDate));
+  let next: PrototypeState = { ...state, command, periods };
+  next = pushAudit(next, deps, {
+    actorId: actor.id,
+    onBehalfOfId: actor.id,
+    action: 'WORK_CENTER_SETTINGS_UPDATED',
+    entityType: 'Command',
+    entityId: command.id,
+    previousState: state.command.musterPolicy.primaryWindowEnd,
+    newState: input.musterBy,
+    metadata: {
+      dutyDays: dutyDays.join(','),
+      holidays: holidays.join(','),
+    },
+  });
+  return { ok: true, state: next, message: 'Work center settings saved.', entityId: command.id };
+}
+
+export function startSailorAccountability(state: PrototypeState, actor: Sailor, deps: DomainDeps, summary?: string): Mutation {
+  if (state.dependents.every((item) => item.sponsorId !== actor.id)) return fail('No dependents are registered for you.');
+  if (activeEmergency(state)) return fail('The Navy has already opened accountability for the command.');
+  const existing = state.emergencies.find((event) => event.origin === 'SAILOR' && event.sponsorId === actor.id);
+  const at = stamp(deps);
+  const text = summary?.trim() || `${displayName(actor)} asked for help accounting for dependents.`;
+  if (existing?.active) {
+    const emergencies = state.emergencies.map((event) => (event.id === existing.id ? { ...event, summary: text } : event));
+    return { ok: true, state: { ...state, emergencies }, message: 'Your request for help is updated.', entityId: existing.id };
+  }
+  const opened: EmergencyEvent = {
+    id: existing?.id ?? deps.id('event'),
+    name: 'Request for help',
+    kind: 'OTHER',
+    summary: text,
+    commandIds: [actor.commandId],
+    active: true,
+    activatable: true,
+    activatedAt: at,
+    closedAt: null,
+    sourceSystem: 'NFAAS_SIMULATION',
+    origin: 'SAILOR',
+    sponsorId: actor.id,
+  };
+  const emergencies = existing
+    ? state.emergencies.map((event) => (event.id === existing.id ? opened : event))
+    : [opened, ...state.emergencies];
+  let next: PrototypeState = { ...state, emergencies };
+  next = pushAudit(next, deps, {
+    actorId: actor.id,
+    onBehalfOfId: actor.id,
+    action: 'FAMILY_HELP_REQUESTED',
+    entityType: 'EmergencyEvent',
+    entityId: opened.id,
+    previousState: existing ? 'INACTIVE' : null,
+    newState: 'ACTIVE',
+    metadata: { origin: 'SAILOR' },
+  });
+  return { ok: true, state: next, message: 'Request for help opened. Report each dependent.', entityId: opened.id };
+}
+
+export function submitSelfHelp(
+  state: PrototypeState,
+  actor: Sailor,
+  input: { kind: SelfHelpKind; detail: string; notifySupervisor: boolean; subject: HelpSubject; shipmateId: string | null; shipmateName?: string | null },
+  deps: DomainDeps,
+): Mutation {
+  const quiet = input.kind === 'CRISIS' || input.kind === 'SAPR';
+  const detail = quiet ? '' : input.detail.trim();
+  const typedName = input.shipmateName?.trim() ?? '';
+  const shipmate = input.shipmateId ? sailorById(state, input.shipmateId) : undefined;
+  if (input.subject !== 'MYSELF') {
+    if (input.shipmateId && (!shipmate || shipmate.id === actor.id || shipmate.commandId !== actor.commandId)) {
+      return fail('Choose a shipmate in your command.');
+    }
+    if (!shipmate && typedName.length < 2) return fail('Enter a shipmate or choose one from your command.');
+  }
+  const shipmateName = input.subject === 'MYSELF' ? null : typedName || (shipmate ? displayName(shipmate) : null);
+  if (input.kind === 'UNABLE_TO_REACH' && !shipmateName) return fail('Enter the shipmate you cannot reach.');
+  if (input.kind === 'OTHER' && detail.length < 3) return fail('Say what help is needed. Do not describe the incident.');
+  if ((input.kind === 'RIDE' || input.kind === 'MEDICAL') && detail.length < 2) return fail('Choose the detail that applies.');
+  const supervisor = supervisorFor(state, actor.id);
+  const summary = summarizeSelfHelp({
+    kind: input.kind,
+    detail,
+    notifySupervisor: input.notifySupervisor,
+    subject: input.subject,
+    shipmateName,
+  });
+  const request: SelfHelpRequest = {
+    id: deps.id('self-help'),
+    sailorId: actor.id,
+    supervisorId: supervisor?.id ?? null,
+    subject: input.subject,
+    shipmateId: shipmate?.id ?? null,
+    shipmateName,
+    kind: input.kind,
+    summary,
+    createdAt: stamp(deps),
+  };
+  let next: PrototypeState = { ...state, selfHelpRequests: [request, ...(state.selfHelpRequests ?? [])] };
+  next = pushAudit(next, deps, {
+    actorId: actor.id,
+    onBehalfOfId: shipmate && input.subject === 'SHIPMATE' ? shipmate.id : actor.id,
+    action: 'SELF_HELP_REQUESTED',
+    entityType: 'SelfHelpRequest',
+    entityId: request.id,
+    previousState: null,
+    newState: input.kind,
+    metadata: { notifySupervisor: input.notifySupervisor ? 'true' : 'false', subject: input.subject },
+  });
+  if (input.notifySupervisor && supervisor) {
+    const forShipmate = input.subject !== 'MYSELF';
+    next = pushNotification(next, deps, {
+      recipientId: supervisor.id,
+      kind: 'ASSISTANCE_FOLLOWUP',
+      title: quiet ? 'Sailor asked for a check-in' : forShipmate ? 'Help requested for a shipmate' : 'Sailor asked for help',
+      body: quiet ? `${displayName(actor)} asked you to make contact. No further detail was provided.` : summary,
+      href: '/team',
+      pushEligible: true,
+    });
+  }
+  return { ok: true, state: next, message: 'Help request submitted.', entityId: request.id };
+}
+
+export function submitFamilyHelp(
+  state: PrototypeState,
+  actor: Sailor,
+  input: { dependentIds: string[]; kind: FamilyHelpKind; location: string; remarks: string },
+  deps: DomainDeps,
+): Mutation {
+  const mine = state.dependents.filter((item) => item.sponsorId === actor.id);
+  const chosen = mine.filter((person) => input.dependentIds.includes(person.id));
+  if (chosen.length === 0) return fail('Choose at least one dependent.');
+  const location = input.location.trim();
+  const remarks = input.remarks.trim();
+  if (location.length < 4) return fail('Enter where they are.');
+  if (remarks.length > 280) return fail('Keep remarks under 280 characters.');
+  const summary = summarizeFamilyHelp(
+    input.kind,
+    chosen.map((person) => `${person.firstName} ${person.lastName}`),
+    location,
+    remarks,
+  );
+  const request: FamilyHelpRequest = {
+    id: deps.id('family-help'),
+    sponsorId: actor.id,
+    dependentIds: chosen.map((person) => person.id),
+    kind: input.kind,
+    location,
+    remarks,
+    summary,
+    createdAt: stamp(deps),
+  };
+  let next: PrototypeState = { ...state, familyHelpRequests: [request, ...(state.familyHelpRequests ?? [])] };
+  if (activeEmergency(next)) {
+    next = pushAudit(next, deps, {
+      actorId: actor.id,
+      onBehalfOfId: actor.id,
+      action: 'FAMILY_HELP_REQUESTED',
+      entityType: 'FamilyHelpRequest',
+      entityId: request.id,
+      previousState: 'COMMAND_EVENT_OPEN',
+      newState: input.kind,
+      metadata: { summary },
+    });
+    return { ok: true, state: next, message: 'The Navy already has accountability open. Your help request was sent with the details you entered.', entityId: request.id };
+  }
+  const opened = startSailorAccountability(next, actor, deps, summary);
+  if (!opened.ok) return opened;
+  return { ok: true, state: opened.state, message: 'Request for help submitted.', entityId: request.id };
+}
+
+export function pushCommandAccountability(state: PrototypeState, actor: Sailor, open: boolean, deps: DomainDeps): Mutation {
+  if (!hasRole(actor, 'COMMAND_CERTIFIER')) return fail('Only the command certification authority can open a Navy accountability event.');
+  const at = stamp(deps);
+  const existing = state.emergencies.find((event) => event.id === 'event-command');
+  if (open && existing?.active) return { ok: true, state, message: 'Command accountability is already open.', entityId: existing.id };
+  if (!open && !existing?.active) return { ok: true, state, message: 'Command accountability is already closed.', entityId: existing?.id };
+  const opened: EmergencyEvent = {
+    id: 'event-command',
+    name: 'Navy accountability',
+    kind: 'OTHER',
+    summary: 'The command requires every Sailor to validate their own status and their family’s status.',
+    commandIds: [state.command.id],
+    active: open,
+    activatable: true,
+    activatedAt: open ? at : existing?.activatedAt ?? null,
+    closedAt: open ? null : at,
+    sourceSystem: 'NFAAS_SIMULATION',
+    origin: 'COMMAND',
+    sponsorId: null,
+  };
+  const emergencies = existing
+    ? state.emergencies.map((event) => (event.id === existing.id ? opened : event))
+    : [opened, ...state.emergencies];
+  let next: PrototypeState = { ...state, emergencies };
+  next = pushAudit(next, deps, {
+    actorId: actor.id,
+    onBehalfOfId: actor.id,
+    action: open ? 'COMMAND_ACCOUNTABILITY_OPENED' : 'COMMAND_ACCOUNTABILITY_CLOSED',
+    entityType: 'EmergencyEvent',
+    entityId: opened.id,
+    previousState: existing?.active ? 'ACTIVE' : 'INACTIVE',
+    newState: open ? 'ACTIVE' : 'INACTIVE',
+    metadata: { origin: 'COMMAND' },
+  });
+  if (open) {
+    for (const sailor of state.sailors.filter((item) => item.commandId === state.command.id)) {
+      next = pushNotification(next, deps, {
+        recipientId: sailor.id,
+        kind: 'EMERGENCY_ACTIVATED',
+        title: 'Navy accountability',
+        body: 'Validate your own status and your family’s status. The command needs every Sailor and every family accounted for.',
+        href: '/family',
+        pushEligible: true,
+      });
+    }
+  }
+  return {
+    ok: true,
+    state: next,
+    message: open
+      ? 'Navy accountability is open. The command was notified to validate personnel and families.'
+      : 'Navy accountability is closed.',
+    entityId: opened.id,
+  };
+}
+
+export function setShareLocation(state: PrototypeState, actor: Sailor, mode: ShareLocation): Mutation {
+  const mine = state.dependents.filter((item) => item.sponsorId === actor.id);
+  if (mine.length === 0) return fail('No dependents are registered for you.');
+  const household = (state.households ?? []).find((item) => item.sponsorId === actor.id);
+  const spouse = mine.find((item) => item.relationship === 'SPOUSE');
+  let dependents = state.dependents;
+  if (mode === 'SAILOR') {
+    if (!household || household.address.trim().length < 8) return fail('Add your address before sharing it with the family.');
+    dependents = dependents.map((item) => (item.sponsorId === actor.id ? { ...item, address: household.address.trim() } : item));
+  }
+  if (mode === 'SPOUSE') {
+    if (!spouse || spouse.address.trim().length < 8) return fail('Add the spouse address before sharing it with the family.');
+    dependents = dependents.map((item) =>
+      item.sponsorId === actor.id && item.id !== spouse.id ? { ...item, address: spouse.address.trim() } : item,
+    );
+  }
+  const nextHousehold = {
+    sponsorId: actor.id,
+    phone: household?.phone ?? '',
+    address: household?.address ?? '',
+    shareLocation: mode,
+  };
+  const households = household
+    ? (state.households ?? []).map((item) => (item.sponsorId === actor.id ? nextHousehold : item))
+    : [nextHousehold, ...(state.households ?? [])];
+  const message =
+    mode === 'SAILOR'
+      ? 'Your address was copied to each dependent.'
+      : mode === 'SPOUSE'
+        ? 'The spouse address was copied to the rest of the family.'
+        : 'Each dependent keeps their own address.';
+  return { ok: true, state: { ...state, dependents, households }, message };
+}
+
+export function updateHousehold(state: PrototypeState, actor: Sailor, phone: string, address: string): Mutation {
+  const nextPhone = phone.trim();
+  const nextAddress = address.trim();
+  if (nextPhone.length < 7) return fail('Enter your phone number.');
+  if (nextAddress.length < 8) return fail('Enter your street address.');
+  const household = (state.households ?? []).find((item) => item.sponsorId === actor.id);
+  const next = { sponsorId: actor.id, phone: nextPhone, address: nextAddress, shareLocation: household?.shareLocation ?? 'OWN' };
+  let dependents = state.dependents;
+  if (next.shareLocation === 'SAILOR') {
+    dependents = dependents.map((item) => (item.sponsorId === actor.id ? { ...item, address: nextAddress } : item));
+  }
+  const households = household
+    ? (state.households ?? []).map((item) => (item.sponsorId === actor.id ? next : item))
+    : [next, ...(state.households ?? [])];
+  return { ok: true, state: { ...state, dependents, households }, message: 'Your contact information saved.' };
+}
+
+export function accountForFamily(state: PrototypeState, actor: Sailor, accounted: boolean, deps: DomainDeps): Mutation {
+  const mine = state.dependents.filter((item) => item.sponsorId === actor.id);
+  if (mine.length === 0) return fail('No dependents are registered for you.');
+  const status: 'SAFE' | 'UNKNOWN' = accounted ? 'SAFE' : 'UNKNOWN';
+  const dependents = state.dependents.map((item) =>
+    item.sponsorId === actor.id ? { ...item, currentStatus: status, statusLocation: accounted ? item.address : item.statusLocation } : item,
+  );
+  const event = familyEventFor({ ...state, dependents }, actor.id);
+  if (!event) {
+    return { ok: true, state: { ...state, dependents }, message: accounted ? 'Family marked accounted for.' : 'Family accounting cleared.' };
+  }
+  const members: FamilyMemberReport[] = mine.map((person) => ({
+    dependentId: person.id,
+    status,
+    generalLocation: null,
+    safeContact: null,
+    needs: [],
+    context: '',
+  }));
+  const reported = submitFamily({ ...state, dependents }, actor, event.id, members, deps);
+  if (!reported.ok) return reported;
+  return { ...reported, message: accounted ? 'Family marked accounted for.' : 'Family accounting cleared.' };
+}
+
+export function certifyCommand(state: PrototypeState, actor: Sailor, deps: DomainDeps): Mutation {
+  if (!hasRole(actor, 'COMMAND_CERTIFIER')) return fail('Only the command certification authority can certify the command muster.');
+  const today = todayInZone(state.command.timezone, deps.now());
+  const period = periodForDate(state, today);
+  if (!period?.required) return fail('Muster is not required today.');
+  if ((state.commandCertifications ?? []).some((item) => item.commandId === state.command.id && item.reportingDate === today)) {
+    return fail('Today’s command muster is already certified.');
+  }
+  const outstanding: string[] = [];
+  let confirmed = 0;
+  for (const sailor of state.sailors.filter((item) => item.commandId === actor.commandId)) {
+    const record = currentMuster(state, sailor.id, today);
+    if (record?.verification === 'VERIFIED') confirmed += 1;
+    else outstanding.push(displayName(sailor));
+  }
+  const certification: CommandCertification = {
+    id: deps.id('cert'),
+    commandId: state.command.id,
+    reportingDate: today,
+    certifiedBy: actor.id,
+    certifiedAt: stamp(deps),
+    confirmed,
+    outstanding,
+  };
+  let next: PrototypeState = {
+    ...state,
+    commandCertifications: [certification, ...(state.commandCertifications ?? [])],
+  };
+  next = pushAudit(next, deps, {
+    actorId: actor.id,
+    onBehalfOfId: actor.id,
+    action: 'COMMAND_MUSTER_CERTIFIED',
+    entityType: 'CommandCertification',
+    entityId: certification.id,
+    previousState: null,
+    newState: `${confirmed} confirmed, ${outstanding.length} outstanding`,
+    metadata: {},
+  });
+  const held = outstanding.length > 0 ? ` ${outstanding.length} still outstanding.` : '';
+  return { ok: true, state: next, message: `Command muster certified. ${confirmed} confirmed.${held}`, entityId: certification.id };
 }
 
 export function activateEmergency(state: PrototypeState, actor: Sailor, eventId: string, deps: DomainDeps): Mutation {
@@ -1010,7 +1791,7 @@ export function submitFamily(
     ok: true,
     state: next,
     message: deps.online
-      ? 'Recorded in prototype — not transmitted to NFAAS.'
+      ? 'Family status submitted.'
       : 'Saved on this device. Not transmitted to NFAAS or your command.',
     entityId: record.id,
   };

@@ -17,6 +17,7 @@ const TZ = 'America/Chicago';
 
 export const SAILOR_ID = 'sailor-alex';
 export const SUPERVISOR_ID = 'sailor-jordan';
+export const CERTIFIER_ID = 'sailor-xo';
 
 const command: Command = {
   id: 'command-meridian',
@@ -39,6 +40,7 @@ const command: Command = {
 const sailors: Sailor[] = [
   person(SAILOR_ID, 'Alex', 'Rivera', 'J', 'HM2', 'Medical', 'MNP-48101', ['SAILOR']),
   person(SUPERVISOR_ID, 'Jordan', 'Hale', 'A', 'IT1', 'Medical', 'MNP-48114', ['SAILOR', 'SUPERVISOR']),
+  person(CERTIFIER_ID, 'Ellen', 'Cho', null, 'CDR', 'Command', 'MNP-48001', ['SAILOR', 'COMMAND_CERTIFIER']),
   person('sailor-samir', 'Samir', 'Patel', null, 'HM3', 'Medical', 'MNP-48130', ['SAILOR']),
   person('sailor-rowan', 'Rowan', 'Chen', null, 'HN', 'Medical', 'MNP-48141', ['SAILOR']),
   person('sailor-quinn', 'Quinn', 'Alvarez', null, 'HM3', 'Medical', 'MNP-48163', ['SAILOR']),
@@ -84,11 +86,13 @@ const assignments: CommandAssignment[] = sailors.map((sailor) => ({
   dutyStatus: 'ON_DUTY',
 }));
 
+const HOME = '418 Harbor Lane, Meridian Point, MS 39301';
+
 const dependents: Dependent[] = [
-  dependent('dep-morgan', 'Morgan', 'Rivera', 'SPOUSE', 'Mobile on file ending 0142', 'CURRENT', '2026-09-02'),
-  dependent('dep-riley', 'Riley', 'Rivera', 'CHILD', 'Mobile on file ending 2281', 'REVIEW_DUE', '2026-06-18'),
-  dependent('dep-avery', 'Avery', 'Rivera', 'CHILD', 'Mobile on file ending 7730', 'CURRENT', '2026-09-02'),
-  dependent('dep-elena', 'Elena', 'Vargas', 'PARENT', 'Mobile on file ending 4419', 'REVIEW_DUE', '2026-04-11'),
+  dependent('dep-morgan', 'Morgan', 'Rivera', 'SPOUSE', '(228) 555-0142', HOME, 'CURRENT', '2026-09-02', 'SAFE'),
+  dependent('dep-riley', 'Riley', 'Rivera', 'CHILD', '(228) 555-2281', HOME, 'REVIEW_DUE', '2026-06-18', 'UNKNOWN'),
+  dependent('dep-avery', 'Avery', 'Rivera', 'CHILD', '(228) 555-7730', HOME, 'CURRENT', '2026-09-02', 'SAFE'),
+  dependent('dep-elena', 'Elena', 'Vargas', 'PARENT', '(228) 555-4419', '92 Cedar Street, Meridian Point, MS 39305', 'REVIEW_DUE', '2026-04-11', 'UNKNOWN'),
 ];
 
 function dependent(
@@ -96,9 +100,11 @@ function dependent(
   firstName: string,
   lastName: string,
   relationship: Dependent['relationship'],
-  contactSummary: string,
+  phone: string,
+  address: string,
   preparednessStatus: Dependent['preparednessStatus'],
   verifiedDate: string,
+  currentStatus: NonNullable<Dependent['currentStatus']>,
 ): Dependent {
   return {
     id,
@@ -106,7 +112,11 @@ function dependent(
     firstName,
     lastName,
     relationship,
-    contactSummary,
+    phone,
+    address,
+    contactSummary: `${phone} · ${address}`,
+    currentStatus,
+    statusLocation: null,
     preparednessStatus,
     lastVerifiedAt: zonedLocalToUtc(verifiedDate, '09:00', TZ),
     sourceSystem: 'PERSONNEL_SERVICE',
@@ -124,8 +134,8 @@ export function createSeed(now: Date): PrototypeState {
     }
   }
   musters.push(
-    buildRecord(sailors[0], today, 'PRESENT', 'AWAITING_VERIFICATION', null, '07:05'),
     buildRecord(sailors[1], today, 'PRESENT', 'VERIFIED', SUPERVISOR_ID, '06:20'),
+    buildRecord(byId(CERTIFIER_ID), today, 'PRESENT', 'VERIFIED', CERTIFIER_ID, '06:05'),
     buildRecord(byId('sailor-samir'), today, 'PRESENT', 'AWAITING_VERIFICATION', null, '07:12'),
     buildRecord(byId('sailor-rowan'), today, 'PRESENT', 'AWAITING_VERIFICATION', null, '07:22'),
     buildRecord(byId('sailor-drew'), today, 'PRESENT', 'VERIFIED', SUPERVISOR_ID, '06:48'),
@@ -199,6 +209,18 @@ export function createSeed(now: Date): PrototypeState {
     outbox: [],
     reviewRequests: [],
     preparednessChecks: { [SAILOR_ID]: ['contacts', 'meeting'] },
+    selfHelpRequests: [],
+    familyHelpRequests: [],
+    lateReports: [],
+    households: [
+      {
+        sponsorId: SAILOR_ID,
+        phone: '(228) 555-0108',
+        address: HOME,
+        shareLocation: 'OWN',
+      },
+    ],
+    commandCertifications: [],
   };
 }
 

@@ -1,4 +1,4 @@
-export type Role = 'SAILOR' | 'SUPERVISOR' | 'MUSTER_COORDINATOR' | 'COMMAND_LEADERSHIP';
+export type Role = 'SAILOR' | 'SUPERVISOR' | 'MUSTER_COORDINATOR' | 'COMMAND_LEADERSHIP' | 'COMMAND_CERTIFIER';
 
 export type SyncState =
   | 'SAVED_ON_DEVICE'
@@ -159,6 +159,10 @@ export interface Dependent {
   lastName: string;
   relationship: 'SPOUSE' | 'CHILD' | 'PARENT' | 'OTHER';
   contactSummary: string;
+  phone: string;
+  address: string;
+  currentStatus?: Exclude<FamilyStatus, 'NOT_REPORTED'>;
+  statusLocation?: string | null;
   preparednessStatus: 'CURRENT' | 'REVIEW_DUE' | 'INCOMPLETE';
   lastVerifiedAt: string;
   sourceSystem: SourceSystem;
@@ -179,7 +183,7 @@ export interface MusterEvent {
   id: string;
   at: string;
   actorId: string;
-  type: 'SUBMITTED' | 'CORRECTED' | 'VERIFIED' | 'FLAGGED' | 'SUPERVISOR_CORRECTION';
+  type: 'SUBMITTED' | 'CORRECTED' | 'VERIFIED' | 'FLAGGED' | 'SUPERVISOR_CORRECTION' | 'CERTIFIER_OVERRIDE';
   status: MusterStatus;
   verification: MusterVerification;
   note: string | null;
@@ -220,6 +224,27 @@ export interface EmergencyEvent {
   activatedAt: string | null;
   closedAt: string | null;
   sourceSystem: 'NFAAS_SIMULATION';
+  origin?: 'SAILOR' | 'COMMAND';
+  sponsorId?: string | null;
+}
+
+export type ShareLocation = 'OWN' | 'SAILOR' | 'SPOUSE';
+
+export interface Household {
+  sponsorId: string;
+  phone: string;
+  address: string;
+  shareLocation: ShareLocation;
+}
+
+export interface CommandCertification {
+  id: string;
+  commandId: string;
+  reportingDate: string;
+  certifiedBy: string;
+  certifiedAt: string;
+  confirmed: number;
+  outstanding: string[];
 }
 
 export interface FamilyMemberReport {
@@ -290,6 +315,7 @@ export interface SnivRequest {
   endTime: string;
   durationMinutes: number;
   remarks: string;
+  categoryNote?: string;
   status: SnivStatus;
   createdAt: string;
   updatedAt: string;
@@ -325,6 +351,46 @@ export interface OutboxItem {
   conflictNote: string | null;
 }
 
+export type SelfHelpKind = 'CRISIS' | 'SAPR' | 'RIDE' | 'MEDICAL' | 'UNABLE_TO_REACH' | 'OTHER';
+
+export type HelpSubject = 'MYSELF' | 'SHIPMATE' | 'BOTH';
+
+export interface SelfHelpRequest {
+  id: string;
+  sailorId: string;
+  supervisorId: string | null;
+  subject: HelpSubject;
+  shipmateId: string | null;
+  shipmateName: string | null;
+  kind: SelfHelpKind;
+  summary: string;
+  createdAt: string;
+}
+
+export type LateReason = 'CAR_TROUBLE' | 'SICKNESS' | 'TRAFFIC' | 'CHILDCARE' | 'OVERSLEPT' | 'OTHER';
+
+export interface LateReport {
+  id: string;
+  sailorId: string;
+  reportingDate: string;
+  reason: LateReason;
+  note: string;
+  createdAt: string;
+}
+
+export type FamilyHelpKind = 'SHELTER' | 'MEDICAL' | 'TRANSPORTATION' | 'UNABLE_TO_CONTACT' | 'OTHER';
+
+export interface FamilyHelpRequest {
+  id: string;
+  sponsorId: string;
+  dependentIds: string[];
+  kind: FamilyHelpKind;
+  location: string;
+  remarks: string;
+  summary: string;
+  createdAt: string;
+}
+
 export interface InfoReviewRequest {
   id: string;
   sponsorId: string;
@@ -352,6 +418,11 @@ export interface PrototypeState {
   outbox: OutboxItem[];
   reviewRequests: InfoReviewRequest[];
   preparednessChecks: Record<string, string[]>;
+  households: Household[];
+  commandCertifications: CommandCertification[];
+  selfHelpRequests: SelfHelpRequest[];
+  familyHelpRequests: FamilyHelpRequest[];
+  lateReports: LateReport[];
 }
 
 export interface DomainDeps {
@@ -367,6 +438,8 @@ export type Mutation =
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
+export type SnivRecurrence = 'NONE' | 'DAILY' | 'WEEKDAYS' | 'WEEKLY';
+
 export interface SnivInput {
   category: SnivCategory;
   date: string;
@@ -374,7 +447,16 @@ export interface SnivInput {
   startTime: string;
   endTime: string;
   remarks: string;
+  categoryNote?: string;
   requestId?: string;
+  recurrence?: SnivRecurrence;
+  untilDate?: string;
+}
+
+export interface WorkCenterSettingsInput {
+  musterBy: string;
+  dutyDays: number[];
+  holidays: string[];
 }
 
 export const PREPAREDNESS_ITEMS = [

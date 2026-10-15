@@ -78,6 +78,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   SUPERVISOR: 'Supervisor',
   MUSTER_COORDINATOR: 'Muster Coordinator',
   COMMAND_LEADERSHIP: 'Command Leadership',
+  COMMAND_CERTIFIER: 'Command Certifier',
 };
 
 export const RELATIONSHIP_LABEL = {

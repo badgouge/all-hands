@@ -1,7 +1,7 @@
 import { createSeed, SAILOR_ID } from '../data/seed';
 import type { PrototypeState } from '../domain/types';
 
-export const STORAGE_KEY = 'mnp-accountability-v3';
+export const STORAGE_KEY = 'mnp-accountability-v6';
 export const THEME_KEY = 'mnp-theme';
 
 export interface AppSettings {

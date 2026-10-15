@@ -6,6 +6,10 @@ import {
   approveSniv,
   approveWorkCenter,
   approvedAbsencesOn,
+  confirmWorkCenter,
+  overrideMuster,
+  pushCommandAccountability,
+  submitSelfHelp,
   emergencyAggregate,
   listDependents,
   submitFamily,
@@ -15,7 +19,7 @@ import {
   verifyMuster,
 } from './accountability';
 import type { DomainDeps, FamilyMemberReport, PrototypeState, Sailor } from './types';
-import { musterCardModel } from './viewModels';
+import { musterCardModel, workCenterQueue } from './viewModels';
 
 const FIXED = new Date('2026-10-13T22:00:00.000Z');
 
@@ -246,7 +250,7 @@ describe('accountability rules', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const today = (id: string) => result.state.musters.find((record) => record.sailorId === id && record.reportingDate === '2026-10-13');
-    expect(today('sailor-alex')?.verification).toBe('VERIFIED');
+    expect(today('sailor-alex')).toBeUndefined();
     expect(today('sailor-samir')?.verification).toBe('VERIFIED');
     expect(today('sailor-rowan')?.verification).toBe('VERIFIED');
     expect(today('sailor-parker')?.verification).toBe('VERIFIED');
@@ -257,5 +261,93 @@ describe('accountability rules', () => {
     expect(result.state.snivRequests.find((request) => request.id === 'sniv-rowan-pending')?.status).toBe('APPROVED');
     expect(result.message).toMatch(/not mustered/i);
     expect(approveWorkCenter(state, sailor(state, 'sailor-alex'), deps()).ok).toBe(false);
+  });
+
+  it('includes the supervisor in the work center and approves only the sailors who are selected', () => {
+    const state = createSeed(FIXED);
+    const jordan = sailor(state, 'sailor-jordan');
+    const queue = workCenterQueue(state, jordan, FIXED, false);
+    expect(queue.some((member) => member.sailorId === 'sailor-jordan')).toBe(true);
+    const selected = confirmWorkCenter(state, jordan, deps(), ['sailor-samir']);
+    expect(selected.ok).toBe(true);
+    if (!selected.ok) return;
+    const today = (id: string) => selected.state.musters.find((record) => record.sailorId === id && record.reportingDate === '2026-10-13');
+    expect(today('sailor-samir')?.verification).toBe('VERIFIED');
+    expect(today('sailor-rowan')?.verification).toBe('AWAITING_VERIFICATION');
+    expect(today('sailor-parker')?.verification).toBe('AWAITING_VERIFICATION');
+  });
+
+  it('records a routine late reason with the muster and does not open an emergency request', () => {
+    const state = withoutToday(createSeed(FIXED));
+    const result = submitMuster(state, sailor(state, 'sailor-alex'), 'PRESENT', deps(), { reason: 'CAR_TROUBLE', note: '' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(todayMuster(result.state)[0]?.events[0]?.note).toMatch(/Car trouble/);
+    expect(result.state.lateReports[0]?.reason).toBe('CAR_TROUBLE');
+    expect(result.state.selfHelpRequests).toHaveLength(0);
+    expect(result.state.notifications[0]?.title).toBe('Sailor running late');
+  });
+
+  it('records a self-help request without an incident narrative for the crisis line', () => {
+    const state = createSeed(FIXED);
+    const result = submitSelfHelp(
+      state,
+      sailor(state, 'sailor-alex'),
+      { kind: 'CRISIS', detail: 'should not be stored', notifySupervisor: true, subject: 'MYSELF', shipmateId: null },
+      deps(),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const request = result.state.selfHelpRequests[0];
+    expect(request.summary).toMatch(/Military Crisis Line/);
+    expect(request.summary).not.toMatch(/should not be stored/);
+    expect(result.state.notifications[0]?.body).toMatch(/No further detail/);
+  });
+
+  it('accepts a typed shipmate name when the sailor is not chosen from the command list', () => {
+    const state = createSeed(FIXED);
+    const result = submitSelfHelp(
+      state,
+      sailor(state, 'sailor-alex'),
+      { kind: 'RIDE', detail: 'Right now', notifySupervisor: true, subject: 'SHIPMATE', shipmateId: null, shipmateName: 'HN Casey Quinn' },
+      deps(),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.selfHelpRequests[0]?.shipmateId).toBeNull();
+    expect(result.state.selfHelpRequests[0]?.shipmateName).toBe('HN Casey Quinn');
+    expect(result.state.selfHelpRequests[0]?.summary).toMatch(/HN Casey Quinn/);
+  });
+
+  it('notifies every Sailor to validate personnel and families when Navy accountability opens', () => {
+    const state = createSeed(FIXED);
+    const result = pushCommandAccountability(state, sailor(state, 'sailor-xo'), true, deps());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const notes = result.state.notifications.filter((item) => item.title === 'Navy accountability');
+    const commandIds = state.sailors.filter((item) => item.commandId === state.command.id).map((item) => item.id);
+    expect(notes.map((item) => item.recipientId).sort()).toEqual([...commandIds].sort());
+    expect(notes.every((item) => item.pushEligible && item.kind === 'EMERGENCY_ACTIVATED')).toBe(true);
+    expect(notes[0]?.body).toMatch(/family/i);
+    expect(notes[0]?.body).toMatch(/status/i);
+  });
+
+  it('lets the command certifier override a confirmed muster and record one that was not submitted', () => {
+    const state = createSeed(FIXED);
+    const xo = sailor(state, 'sailor-xo');
+    const denied = overrideMuster(state, sailor(state, 'sailor-jordan'), 'sailor-samir', 'SICK', deps());
+    expect(denied.ok).toBe(false);
+    const overridden = overrideMuster(state, xo, 'sailor-jordan', 'SICK', deps());
+    expect(overridden.ok).toBe(true);
+    if (!overridden.ok) return;
+    const jordan = todayMuster(overridden.state, 'sailor-jordan')[0];
+    expect(jordan?.status).toBe('SICK');
+    expect(jordan?.verification).toBe('VERIFIED');
+    expect(jordan?.events.at(-1)?.type).toBe('CERTIFIER_OVERRIDE');
+    expect(jordan?.events.length).toBeGreaterThan(1);
+    const recorded = overrideMuster(state, xo, 'sailor-quinn', 'PRESENT', deps());
+    expect(recorded.ok).toBe(true);
+    if (!recorded.ok) return;
+    expect(todayMuster(recorded.state, 'sailor-quinn')[0]?.verification).toBe('VERIFIED');
   });
 });

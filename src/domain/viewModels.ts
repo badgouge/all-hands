@@ -164,7 +164,13 @@ export function familyCardModel(state: PrototypeState, sailor: Sailor) {
 export function snivCardModel(state: PrototypeState, sailor: Sailor, today: string) {
   const mine = state.snivRequests.filter((request) => request.sailorId === sailor.id);
   const next = mine
-    .filter((request) => request.status === 'APPROVED' && request.endDate >= today)
+    .filter(
+      (request) =>
+        request.status !== 'DENIED' &&
+        request.status !== 'CANCELLED' &&
+        request.status !== 'COMPLETED' &&
+        request.endDate >= today,
+    )
     .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))[0];
   return {
     next: next
@@ -198,7 +204,7 @@ export function rosterRows(state: PrototypeState, actor: Sailor, now: Date, forc
     scope === 'COMMAND'
       ? state.sailors.filter((sailor) => sailor.commandId === state.command.id)
       : scope === 'DIRECT_REPORTS'
-        ? directReports(state, actor.id)
+        ? [actor, ...directReports(state, actor.id).filter((sailor) => sailor.id !== actor.id)]
         : [];
   const today = todayInZone(state.command.timezone, now);
   const period = periodForDate(state, today);
@@ -302,6 +308,7 @@ function activityText(action: string): string {
     MUSTER_VERIFIED: 'Muster verified by command',
     MUSTER_FLAGGED: 'Muster flagged by command',
     MUSTER_SUPERVISOR_CORRECTION: 'Muster corrected by command',
+    MUSTER_CERTIFIER_OVERRIDE: 'Muster overridden by the command certifier',
     MUSTER_RECEIVED: 'Muster received',
     SNIV_SUBMITTED: 'Snivel request submitted',
     SNIV_APPROVED: 'Snivel request approved',
@@ -319,7 +326,7 @@ function activityText(action: string): string {
     EMERGENCY_CLOSED: 'Emergency accountability event closed',
     FAMILY_REVIEW_REQUESTED: 'Family information review saved on device',
   };
-  return labels[action] ?? 'Accountability activity';
+  return labels[action] ?? 'All Hands activity';
 }
 
 export function upcomingAbsences(state: PrototypeState, sailorId: string, today: string) {
